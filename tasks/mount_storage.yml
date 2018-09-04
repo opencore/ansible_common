@@ -1,0 +1,79 @@
+- name: Create mount group
+  group:
+    name: "{{ MOUNT_GROUP}}"
+    state: present
+
+- name: Create mount user
+  user:
+    name: "{{ MOUNT_USER}}"
+    group: "{{ MOUNT_GROUP}}"
+    createhome: no
+    shell: "/bin/false"
+    state: present
+
+- name: Find local volumes
+  shell: lsblk -l -n | grep disk | awk -F" " '{ print $1}'
+  register: local_storage_devices
+
+- name: Check existing mounts
+  shell: mount | awk -F" " '{print $1}'
+  register: existing_mounts
+
+- name: Create filesystem on local volumes
+  command: mkfs.xfs /dev/{{ item }}
+  with_items: "{{ local_storage_devices.stdout_lines }}"
+  become: yes
+  ignore_errors: yes
+  when: existing_mounts.stdout.find(item) == -1
+
+- name: Create mountpoints
+  file:
+    path: "{{ MOUNT_DIR }}/dev_{{ item }}"
+    state: directory
+    mode: 0644
+  with_items: "{{ local_storage_devices.stdout_lines }}"
+  when: existing_mounts.stdout.find(item) == -1
+
+- name: Mount local storage devices
+  mount:
+    boot: yes
+    src: "/dev/{{ item }}"
+    fstype: xfs
+    path: "{{ MOUNT_DIR }}/dev_{{ item }}"  
+    state: mounted
+  with_items: "{{ local_storage_devices.stdout_lines }}"
+  when: existing_mounts.stdout.find(item) == -1
+
+- name: Register mountpoints
+  find:
+    paths: "{{ MOUNT_DIR }}"
+    file_type: directory
+    patterns: dev_*
+  register: mount_points
+
+- name: Create directory if no block devices were found
+  file:
+    path: "{{ MOUNT_DIR }}/dev_local"
+    state: directory
+    mode: 0644
+  when: mount_points.matched == 0
+
+- name: Reregister mountpoints
+  find:
+    paths: "{{ MOUNT_DIR }}"
+    file_type: directory
+    patterns: dev_*
+  register: mount_points
+
+- name: Set mountpoint facts
+  set_fact:
+    mounts: "{{ mount_points }}"
+
+- name: Ensure permissions
+  file:
+    path: "{{ MOUNT_DIR }}/"
+    recurse: yes
+    state: directory
+    mode: 0700
+    owner: "{{ MOUNT_USER }}"
+    group: "{{ MOUNT_GROUP}}"

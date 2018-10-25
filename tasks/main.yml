@@ -2,111 +2,86 @@
 
 - name: Set hostname
   hostname:
-    name: "{{ inventory_hostname }}.opencore.com"
+    name: "{{ inventory_hostname }}.{{ domain_name }}"
+  when: set_hostname
 
 - name: Ensure system is up to date
-  yum: name=* state=latest
+  yum:
+    name: "*"
+    state: latest
+  when: update_system
+  notify: reboot
 
-- name: Ensure important packages are installed
-  yum: name={{ item }} state=installed
-  with_items:
-    - libselinux-python
-    - vim-enhanced
-    - chrony
-
-- name: Configure Amazon timeserver
-  lineinfile:
-    dest: /etc/chrony.conf
-    state: present
-    line: server 169.254.169.123 prefer iburst
-    insertbefore: server 0.centos.pool.ntp.org iburst
-
-- name: Start and enable chronyd
-  service:
-    name: chronyd
-    state: started
-    enabled: true
+- name: Ensure important and useful packages are installed
+  yum:
+    name: "{{ packages }}"
+    state: latest
+  vars:
+    packages:
+      - libselinux-python
+      - man
+      - tmux
+      - vim-enhanced
+      - chrony
 
 - name: Ensure SELinux is disabled
-  selinux: state=disabled
+  selinux:
+    state: disabled
+  when: disable_selinux
+  notify: reboot
 
-- name: Ensure that swappiness is set to 1
-  sysctl: name=vm.swappiness value=1 state=present ignoreerrors=yes
+- name: Ensure that IPv6 is disabled
+  lineinfile:
+    dest: /etc/default/grub
+    line: GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX ipv6.disable=1"
+    state: present
+  when: disable_ipv6
+  notify: reboot
 
-- name: Ensure that transparent hugepage compaction is turned off on reboot
-  lineinfile: dest=/etc/rc.d/rc.local regexp='^.*transparent_hugepage/defrag.*$' line='echo never > /sys/kernel/mm/transparent_hugepage/defrag'
+- name: Ensure that common sysctl tunables are set
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    ignoreerrors: yes
+  loop:
+    - { name: 'vm.swappiness', value: 1 }
+  when: enable_sysctl_tunables
 
-- name: Check if transparent hugepage compaction is currently on
-  shell: grep '\[always\]' /sys/kernel/mm/transparent_hugepage/defrag | wc -l
-  check_mode: no
-  register: transparent_hugepage_status
-  changed_when: transparent_hugepage_status.stdout == "1"
+- name: Ensure that Transparent Hugepages are disabled
+  lineinfile:
+    dest: /etc/default/grub
+    line: GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX transparent_hugepage=never"
+    state: present
+  when: disable_thp
+  notify:
+    - update grub
+    - reboot
 
-- name: Ensure that transparent hugepage compaction is off
-  shell: echo 'never' > /sys/kernel/mm/transparent_hugepage/defrag
-  when: transparent_hugepage_status.stdout == "1"
-
-- name: Ensure that transparent hugepages are turned off on reboot
-  lineinfile: dest=/etc/rc.d/rc.local regexp='^.*transparent_hugepage/enabled.*$' line='echo never > /sys/kernel/mm/transparent_hugepage/enabled'
-
-- name: Check if transparent hugepages are currently on
-  shell: grep '\[always\]' /sys/kernel/mm/transparent_hugepage/enabled | wc -l
-  check_mode: no
-  register: transparent_hugepage_status
-  changed_when: transparent_hugepage_status.stdout == "1"
-
-- name: Ensure that transparent hugepages are off
-  shell: echo 'never' > /sys/kernel/mm/transparent_hugepage/enabled
-  when: transparent_hugepage_status.stdout == "1"
-
-- name: Ensure that rc.local runs
-  file: dest=/etc/rc.d/rc.local mode=a+x
-
-#- name: Put /etc/hosts in place
-#  template: "src=hosts.j2 dest='/etc/hosts' owner=root group=root mode=0644"
-#  become: true
-
-# TODO: Check if needed
 - name: Allow 'wheel' group to have passwordless sudo
   lineinfile:
     dest: /etc/sudoers
     state: present
-    regexp: '^%wheel'
+    regexp: ^%wheel
     line: '%wheel ALL=(ALL) NOPASSWD: ALL'
+  when: enable_passwordless_sudo
 
-- name: Reboot
-  shell: sleep 2 && shutdown -r now "Ansible reboot"
-  async: 1
-  poll: 0
-  ignore_errors: true
-
-# TODO: Incorporate into existing playbook
-#- name: Adjust values in sysctl.conf
-#  sysctl: name={{ item.name }} value={{ item.value }} state={{ item.state }}
-#  with_items:
-#    - { name: 'vm.swappiness', value: '1', state: 'present' }
-#    - { name: 'net.ipv6.conf.all.disable_ipv6', value: '1', state: 'present' }
-#    - { name: 'net.ipv6.conf.default.disable_ipv6', value: '1', state: 'present' }
-#
-#- name: Install kerberos prerequisites
-#  yum:
-#    name: "{{ item }}"
-#    state: present
-#  with_items:
-#    - openldap-clients
-#
-
-#
-
-
-- name: wait for server to come back
-  wait_for_connection:
-    delay: 30
-    timeout: 1800
+- name: Ensure Chrony uses correct NTP servers
+  template:
+    src: chrony.conf.j2
+    dest: /etc/chrony.conf
+  when: update_chrony_ntp_servers
+  notify: restart chronyd
 
 - name: Update facts to reflect new hostname
   setup:
 
-- name: Mount ec2 attached storage devices
-  include: mount_storage.yml
-  when: mount_ec2 | bool
+- name: Ensure /etc/hosts is in place
+  template:
+    src: hosts.j2
+    dest: '/etc/hosts'
+    owner: root
+    group: root
+    mode: 0644
+  when: update_hosts
+

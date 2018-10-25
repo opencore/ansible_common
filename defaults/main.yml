@@ -1,3 +1,18 @@
 ---
-mount_ec2: false
+update_system: true
+disable_selinux: true
+disable_ipv6: true
+disable_thp: true
+enable_passwordless_sudo: true
+enable_sysctl_tunables: true
+update_chrony_ntp_servers: true
+update_hosts: false
+set_hostname: true
 
+domain_name: opencore.io
+
+ntp_servers:
+  - 0.centos.pool.ntp.org
+  - 1.centos.pool.ntp.org
+  - 2.centos.pool.ntp.org
+  - 3.centos.pool.ntp.org

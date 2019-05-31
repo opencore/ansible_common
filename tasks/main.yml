@@ -3,13 +3,13 @@
 - name: Set hostname
   hostname:
     name: "{{ inventory_hostname }}.{{ domain_name }}"
-  when: set_hostname
+  when: "{{ set_hostname }}"
 
 - name: Ensure system is up to date
   yum:
     name: "*"
     state: latest
-  when: update_system
+  when: "{{ update_system }}"
   notify: reboot
 
 - name: Ensure important and useful packages are installed
@@ -28,7 +28,7 @@
 - name: Ensure SELinux is disabled
   selinux:
     state: disabled
-  when: disable_selinux
+  when: "{{ disable_selinux }}"
   notify: reboot
 
 - name: Ensure that IPv6 is disabled
@@ -36,7 +36,7 @@
     dest: /etc/default/grub
     line: GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX ipv6.disable=1"
     state: present
-  when: disable_ipv6
+  when: "{{ disable_ipv6 }}"
   notify: reboot
 
 - name: Ensure that common sysctl tunables are set
@@ -47,14 +47,14 @@
     ignoreerrors: yes
   loop:
     - { name: 'vm.swappiness', value: 1 }
-  when: enable_sysctl_tunables
+  when: "{{ enable_sysctl_tunables }}"
 
 - name: Ensure that Transparent Hugepages are disabled
   lineinfile:
     dest: /etc/default/grub
     line: GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX transparent_hugepage=never"
     state: present
-  when: disable_thp
+  when: "{{ disable_thp }}"
   notify:
     - update grub
     - reboot
@@ -65,13 +65,13 @@
     state: present
     regexp: ^%wheel
     line: '%wheel ALL=(ALL) NOPASSWD: ALL'
-  when: enable_passwordless_sudo
+  when: "{{ enable_passwordless_sudo }}"
 
 - name: Ensure Chrony uses correct NTP servers
   template:
     src: chrony.conf.j2
     dest: /etc/chrony.conf
-  when: update_chrony_ntp_servers
+  when: "{{ update_chrony_ntp_servers }}"
   notify: restart chronyd
 
 - name: Update facts to reflect new hostname
@@ -84,5 +84,4 @@
     owner: root
     group: root
     mode: 0644
-  when: update_hosts
-
+  when: "{{ update_hosts }}"
